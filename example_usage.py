@@ -12,6 +12,7 @@ from typing import List, Dict, Any
 # Add the app directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 
+# Import from the correct module path
 from DataPipelineAndModel import load_trained_model, predict_driver_performance
 from config import Config
 
