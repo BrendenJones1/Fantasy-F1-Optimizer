@@ -1,0 +1,283 @@
+import asyncio
+import aiohttp
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import time
+import logging
+from typing import List, Dict, Optional
+import json
+
+logger = logging.getLogger(__name__)
+
+class AsyncF1DataCollector:
+    def __init__(self, fantasy_base_url: str, openf1_base_url: str, rate_limit_delay: float = 1.0):
+        self.fantasy_base_url = fantasy_base_url
+        self.openf1_base_url = openf1_base_url
+        self.rate_limit_delay = rate_limit_delay
+        self.session = None
+        
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
+    
+    async def fetch_with_retry(self, url: str, params: Optional[Dict] = None, headers: Optional[Dict] = None, max_retries: int = 3):
+        """Fetch data with retry logic"""
+        for attempt in range(max_retries):
+            try:
+                async with self.session.get(url, params=params, headers=headers) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    elif response.status == 429:  # Rate limited
+                        wait_time = (2 ** attempt) * self.rate_limit_delay
+                        logger.warning(f"Rate limited, waiting {wait_time}s before retry {attempt + 1}")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"HTTP {response.status} error for {url}")
+                        return None
+            except Exception as e:
+                logger.error(f"Error fetching {url}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(self.rate_limit_delay)
+                    continue
+                return None
+        
+        return None
+    
+    async def get_current_season_data(self, season: int = 2024):
+        """Collect comprehensive data for the current season"""
+        
+        # Get sessions from OpenF1
+        sessions_url = f"{self.openf1_base_url}/sessions"
+        sessions_data = await self.fetch_with_retry(sessions_url, params={"year": season})
+        
+        if not sessions_data:
+            logger.error("Failed to fetch sessions data")
+            return None
+        
+        # Get drivers data
+        drivers_url = f"{self.openf1_base_url}/drivers"
+        drivers_data = await self.fetch_with_retry(drivers_url, params={"session_key": sessions_data[0]["session_key"]})
+        
+        # Collect race results for each session
+        race_results = []
+        for session in sessions_data:
+            if session["session_type"] == "Race":
+                results_url = f"{self.openf1_base_url}/results"
+                results = await self.fetch_with_retry(results_url, params={"session_key": session["session_key"]})
+                
+                if results:
+                    for result in results:
+                        race_results.append({
+                            "session_key": session["session_key"],
+                            "date": session["date_start"],
+                            "driver_number": result["driver_number"],
+                            "position": result["position"],
+                            "points": result.get("points", 0)
+                        })
+                
+                # Rate limiting
+                await asyncio.sleep(self.rate_limit_delay)
+        
+        return {
+            "sessions": sessions_data,
+            "drivers": drivers_data,
+            "race_results": race_results
+        }
+    
+    async def get_driver_performance_metrics(self, driver_number: int, session_key: str):
+        """Get detailed performance metrics for a driver"""
+        
+        # Get car data
+        car_data_url = f"{self.openf1_base_url}/car_data"
+        car_data = await self.fetch_with_retry(car_data_url, params={
+            "driver_number": driver_number,
+            "session_key": session_key
+        })
+        
+        # Get lap times
+        laps_url = f"{self.openf1_base_url}/laps"
+        laps_data = await self.fetch_with_retry(laps_url, params={
+            "driver_number": driver_number,
+            "session_key": session_key
+        })
+        
+        # Calculate performance metrics
+        if car_data and laps_data:
+            avg_speed = np.mean([cd["speed"] for cd in car_data if cd["speed"] is not None])
+            best_lap = min([lap["lap_duration"] for lap in laps_data if lap["lap_duration"] is not None])
+            
+            return {
+                "driver_number": driver_number,
+                "session_key": session_key,
+                "avg_speed": avg_speed,
+                "best_lap": best_lap,
+                "total_laps": len(laps_data)
+            }
+        
+        return None
+
+class F1Predictor:
+    def __init__(self, model_path: str, scaler_path: str, encoder_path: str):
+        import torch
+        import joblib
+        
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Load model
+        self.model = CostEffectivenessModel(input_size=5)  # Adjust based on your features
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.eval()
+        
+        # Load preprocessing objects
+        self.scaler = joblib.load(scaler_path)
+        self.team_encoder = joblib.load(encoder_path)
+        
+    def predict_cost_effectiveness(self, driver_data: List[Dict]) -> List[Dict]:
+        """Predict cost-effectiveness for a list of drivers"""
+        
+        # Prepare features
+        features = []
+        for driver in driver_data:
+            feature_vector = [
+                driver['driver_number'],
+                driver['team_encoded'],
+                driver['price'],
+                driver['season'],
+                driver['race_week']
+            ]
+            features.append(feature_vector)
+        
+        # Scale features
+        features_scaled = self.scaler.transform(features)
+        
+        # Make predictions
+        with torch.no_grad():
+            features_tensor = torch.FloatTensor(features_scaled).to(self.device)
+            predictions = self.model(features_tensor).cpu().numpy()
+        
+        # Combine with driver data
+        results = []
+        for i, driver in enumerate(driver_data):
+            result = driver.copy()
+            result['predicted_cost_effectiveness'] = float(predictions[i])
+            result['recommendation_score'] = float(predictions[i] * 100)  # Scale for easier interpretation
+            results.append(result)
+        
+        # Sort by predicted cost-effectiveness
+        results.sort(key=lambda x: x['predicted_cost_effectiveness'], reverse=True)
+        
+        return results
+    
+    def get_optimal_lineup(self, drivers: List[Dict], budget: float, max_drivers: int = 5) -> List[Dict]:
+        """Get optimal driver lineup within budget constraints"""
+        
+        # Predict cost-effectiveness for all drivers
+        predictions = self.predict_cost_effectiveness(drivers)
+        
+        # Simple greedy selection (can be improved with dynamic programming)
+        selected_drivers = []
+        total_cost = 0
+        
+        for driver in predictions:
+            if len(selected_drivers) >= max_drivers:
+                break
+            
+            if total_cost + driver['price'] <= budget:
+                selected_drivers.append(driver)
+                total_cost += driver['price']
+        
+        return {
+            'selected_drivers': selected_drivers,
+            'total_cost': total_cost,
+            'remaining_budget': budget - total_cost,
+            'predicted_total_points': sum(d['predicted_cost_effectiveness'] * d['price'] for d in selected_drivers)
+        }
+
+async def collect_and_store_data():
+    """Main data collection function"""
+    
+    # Initialize database
+    db = MySQLDatabase()
+    if not db.connect():
+        logger.error("Failed to connect to database")
+        return
+    
+    # Collect data
+    async with AsyncF1DataCollector(
+        fantasy_base_url="https://fantasy-api.formula1.com/partner_games/f1",
+        openf1_base_url="https://api.openf1.org/v1"
+    ) as collector:
+        
+        logger.info("Collecting season data...")
+        season_data = await collector.get_current_season_data(2024)
+        
+        if season_data:
+            # Store drivers
+            for driver in season_data['drivers']:
+                db.insert_driver(
+                    driver_number=driver['driver_number'],
+                    name=driver['full_name'],
+                    team=driver['team_name']
+                )
+            
+            # Store race results
+            for result in season_data['race_results']:
+                db.insert_race_result(
+                    driver_number=result['driver_number'],
+                    season=2024,
+                    race_week=1,  # You'll need to calculate this based on the date
+                    position=result['position'],
+                    points_scored=result['points'],
+                    fantasy_points=result['points'] * 1.5  # Example fantasy points calculation
+                )
+            
+            logger.info(f"Stored data for {len(season_data['drivers'])} drivers and {len(season_data['race_results'])} race results")
+
+def predict_next_race(model_path: str = 'best_f1_model.pth'):
+    """Predict cost-effectiveness for next race"""
+    
+    # Load predictor
+    predictor = F1Predictor(
+        model_path=model_path,
+        scaler_path='feature_scaler.pkl',
+        encoder_path='team_encoder.pkl'
+    )
+    
+    # Example driver data (in practice, fetch from database)
+    drivers_data = [
+        {'driver_number': 1, 'team_encoded': 0, 'price': 25.5, 'season': 2024, 'race_week': 10},
+        {'driver_number': 33, 'team_encoded': 1, 'price': 18.0, 'season': 2024, 'race_week': 10},
+        {'driver_number': 16, 'team_encoded': 2, 'price': 22.0, 'season': 2024, 'race_week': 10},
+        # Add more drivers...
+    ]
+    
+    # Get predictions
+    predictions = predictor.predict_cost_effectiveness(drivers_data)
+    
+    # Get optimal lineup
+    optimal_lineup = predictor.get_optimal_lineup(drivers_data, budget=100.0)
+    
+    print("Top 5 Most Cost-Effective Drivers:")
+    for i, driver in enumerate(predictions[:5]):
+        print(f"{i+1}. Driver #{driver['driver_number']}: {driver['predicted_cost_effectiveness']:.3f} (Score: {driver['recommendation_score']:.1f})")
+    
+    print(f"\nOptimal Lineup (Budget: $100):")
+    for driver in optimal_lineup['selected_drivers']:
+        print(f"Driver #{driver['driver_number']}: ${driver['price']:.1f} (Score: {driver['recommendation_score']:.1f})")
+    
+    print(f"Total Cost: ${optimal_lineup['total_cost']:.1f}")
+    print(f"Remaining Budget: ${optimal_lineup['remaining_budget']:.1f}")
+    print(f"Predicted Total Points: {optimal_lineup['predicted_total_points']:.1f}")
+
+if __name__ == "__main__":
+    # Run data collection
+    asyncio.run(collect_and_store_data())
+    
+    # Run prediction (after model is trained)
+    # predict_next_race()
