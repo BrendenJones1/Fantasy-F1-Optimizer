@@ -12,9 +12,8 @@ from typing import List, Dict, Any
 # Add the app directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 
-# Import from the correct module path
-from DataPipelineAndModel import load_trained_model, predict_driver_performance
-from config import Config
+# Import from the main module
+from DataPipelineAndModel import load_trained_model, predict_driver_performance, Config
 
 def create_sample_drivers() -> List[Dict[str, Any]]:
     """Create sample driver data for prediction"""
@@ -84,12 +83,10 @@ def main():
     
     # Load configuration
     config = Config()
-    config.print_config()
-    
-    # Validate configuration
-    if not config.validate():
-        print("Configuration validation failed. Please check your settings.")
-        return
+    print("Configuration:")
+    print(f"  Database: {config.db_name} on {config.db_host}")
+    print(f"  Model Save Path: {config.model_save_path}")
+    print(f"  Data Save Path: {config.data_save_path}")
     
     print("\nLoading trained model...")
     
@@ -98,7 +95,7 @@ def main():
     
     if model is None:
         print("Failed to load model. Please ensure you have trained the model first.")
-        print("Run: python app/DataPipelineAndModel")
+        print("Run: python3 app/DataPipelineAndModel.py")
         return
     
     print(f"Model loaded successfully!")

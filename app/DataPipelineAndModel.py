@@ -14,176 +14,67 @@ import logging
 from typing import Optional, Dict, Any
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 class Config:
-    """Configuration management for the application"""
+    """Simple configuration management"""
     def __init__(self):
-        self.fantasy_api_base = os.getenv('FANTASY_API_BASE', "https://fantasy-api.formula1.com/partner_games/f1")
-        self.openf1_api_base = os.getenv('OPENF1_API_BASE', "https://api.openf1.org/v1")
-        self.db_host = os.getenv('DB_HOST', 'localhost')
-        self.db_name = os.getenv('DB_NAME', 'f1_data')
-        self.db_user = os.getenv('DB_USER', 'root')
-        self.db_password = os.getenv('DB_PASSWORD', '')
-        self.fantasy_username = os.getenv('FANTASY_USERNAME')
-        self.fantasy_password = os.getenv('FANTASY_PASSWORD')
-        self.model_save_path = os.getenv('MODEL_SAVE_PATH', './models')
-        self.data_save_path = os.getenv('DATA_SAVE_PATH', './data')
+        # Database - change these to match your MySQL setup
+        self.db_host = 'localhost'
+        self.db_name = 'f1_data'
+        self.db_user = 'root'  # or your MySQL username
+        self.db_password = ''   # your MySQL password here
+        
+        # File paths
+        self.model_save_path = './models'
+        self.data_save_path = './data'
+        
+        # Model settings
+        self.hidden_sizes = [64, 32, 16]
+        self.dropout_rate = 0.2
+        self.learning_rate = 0.001
+        self.epochs = 100
+        self.batch_size = 32
 
 class F1DataFetcher:
-    def __init__(self, config: Config):
-        self.config = config
-        self.fantasy_api_base = config.fantasy_api_base
-        self.openf1_api_base = config.openf1_api_base
+    def __init__(self):
         self.session = requests.Session()
-        self._auth_token = None
         
-    def authenticate_fantasy(self) -> bool:
-        """Authenticate with Fantasy F1 API"""
-        try:
-            if not self.config.fantasy_username or not self.config.fantasy_password:
-                logger.warning("Fantasy F1 credentials not provided. Using demo mode.")
-                return False
-                
-            # This is a placeholder for the actual authentication flow
-            # In practice, you would implement the specific auth mechanism for Fantasy F1
-            auth_data = {
-                'username': self.config.fantasy_username,
-                'password': self.config.fantasy_password
-            }
-            
-            # Example auth endpoint - adjust based on actual API
-            auth_url = f"{self.fantasy_api_base}/auth/login"
-            response = self.session.post(auth_url, json=auth_data)
-            
-            if response.status_code == 200:
-                auth_response = response.json()
-                self._auth_token = auth_response.get('token')
-                logger.info("Successfully authenticated with Fantasy F1 API")
-                return True
-            else:
-                logger.error(f"Authentication failed: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error during authentication: {e}")
-            return False
-    
-    def get_fantasy_cookie(self) -> Optional[str]:
-        """Get authentication cookie for Fantasy F1 API"""
-        if not self._auth_token:
-            if not self.authenticate_fantasy():
-                return None
-        return self._auth_token
-    
-    def fetch_fantasy_data(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        """Fetch data from Fantasy F1 API"""
-        try:
-            url = f"{self.fantasy_api_base}/{endpoint}"
-            headers = {
-                'Authorization': f'Bearer {self.get_fantasy_cookie()}',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            response = self.session.get(url, headers=headers, params=params)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Error fetching fantasy data from {endpoint}: {e}")
-            return None
-    
-    def fetch_openf1_data(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        """Fetch data from OpenF1 API"""
-        try:
-            url = f"{self.openf1_api_base}/{endpoint}"
-            response = self.session.get(url, params=params)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Error fetching OpenF1 data from {endpoint}: {e}")
-            return None
-    
-    def get_driver_standings(self, season: int = 2024) -> Optional[Dict[str, Any]]:
-        """Get driver standings from Fantasy F1"""
-        return self.fetch_fantasy_data("drivers", {"season": season})
-    
-    def get_driver_prices(self, season: int = 2024) -> Optional[Dict[str, Any]]:
-        """Get driver prices from Fantasy F1"""
-        return self.fetch_fantasy_data("driver_prices", {"season": season})
-    
-    def get_race_results(self, season: int = 2024) -> Optional[Dict[str, Any]]:
-        """Get race results from Fantasy F1"""
-        return self.fetch_fantasy_data("race_results", {"season": season})
-    
-    def get_car_telemetry(self, driver_number: int, session_key: str) -> Optional[Dict[str, Any]]:
-        """Get car telemetry from OpenF1"""
-        params = {
-            'driver_number': driver_number,
-            'session_key': session_key
-        }
-        return self.fetch_openf1_data("car_data", params)
-    
-    def get_session_info(self, year: int = 2024) -> Optional[Dict[str, Any]]:
-        """Get session information from OpenF1"""
-        return self.fetch_openf1_data("sessions", {"year": year})
-    
-    def get_drivers(self, season: int = 2024) -> Optional[Dict[str, Any]]:
+    def get_drivers(self, year=2024):
         """Get driver information from OpenF1"""
-        return self.fetch_openf1_data("drivers", {"year": season})
+        try:
+            url = f"https://api.openf1.org/v1/drivers"
+            response = self.session.get(url, params={"year": year})
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.warning(f"Could not fetch drivers: {e}")
+            return None
 
 class MySQLDatabase:
     def __init__(self, config: Config):
         self.config = config
-        self.host = config.db_host
-        self.database = config.db_name
-        self.user = config.db_user
-        self.password = config.db_password
         self.connection = None
         
     def connect(self) -> bool:
         """Create database connection"""
         try:
             self.connection = mysql.connector.connect(
-                host=self.host,
-                database=self.database,
-                user=self.user,
-                password=self.password
+                host=self.config.db_host,
+                database=self.config.db_name,
+                user=self.config.db_user,
+                password=self.config.db_password
             )
             if self.connection.is_connected():
-                logger.info("Connected to MySQL database")
+                logger.info(f"Connected to MySQL database: {self.config.db_name}")
                 return True
         except Error as e:
             logger.error(f"Error connecting to MySQL: {e}")
             return False
     
-    def is_connected(self) -> bool:
-        """Check if database connection is still valid"""
-        try:
-            if self.connection and self.connection.is_connected():
-                # Test the connection with a simple query
-                cursor = self.connection.cursor()
-                cursor.execute("SELECT 1")
-                cursor.fetchone()
-                cursor.close()
-                return True
-            return False
-        except Error:
-            return False
-    
-    def ensure_connection(self) -> bool:
-        """Ensure database connection is active, reconnect if necessary"""
-        if not self.is_connected():
-            logger.info("Database connection lost, attempting to reconnect...")
-            return self.connect()
-        return True
-    
     def create_tables(self) -> bool:
         """Create necessary tables"""
-        if not self.ensure_connection():
-            logger.error("Cannot create tables: no database connection")
-            return False
-            
         try:
             cursor = self.connection.cursor()
             
@@ -226,25 +117,8 @@ class MySQLDatabase:
                 )
             """)
             
-            # Car telemetry table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS car_telemetry (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    driver_number INT,
-                    session_key VARCHAR(50),
-                    date DATETIME,
-                    speed DECIMAL(10,2),
-                    throttle DECIMAL(5,2),
-                    brake BOOLEAN,
-                    drs BOOLEAN,
-                    gear INT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (driver_number) REFERENCES drivers(driver_number)
-                )
-            """)
-            
             self.connection.commit()
-            logger.info("Tables created successfully")
+            logger.info("Database tables created successfully")
             return True
             
         except Error as e:
@@ -253,10 +127,6 @@ class MySQLDatabase:
     
     def insert_driver(self, driver_number: int, name: str, team: str) -> bool:
         """Insert driver data"""
-        if not self.ensure_connection():
-            logger.error("Cannot insert driver: no database connection")
-            return False
-            
         try:
             cursor = self.connection.cursor()
             query = """
@@ -265,7 +135,6 @@ class MySQLDatabase:
             """
             cursor.execute(query, (driver_number, name, team))
             self.connection.commit()
-            logger.info(f"Driver {name} inserted/updated successfully")
             return True
         except Error as e:
             logger.error(f"Error inserting driver: {e}")
@@ -274,10 +143,6 @@ class MySQLDatabase:
     def insert_race_result(self, driver_number: int, season: int, race_week: int, 
                           position: int, points_scored: float, fantasy_points: float) -> bool:
         """Insert race result data"""
-        if not self.ensure_connection():
-            logger.error("Cannot insert race result: no database connection")
-            return False
-            
         try:
             cursor = self.connection.cursor()
             query = """
@@ -286,7 +151,6 @@ class MySQLDatabase:
             """
             cursor.execute(query, (driver_number, season, race_week, position, points_scored, fantasy_points))
             self.connection.commit()
-            logger.info(f"Race result for driver {driver_number} inserted successfully")
             return True
         except Error as e:
             logger.error(f"Error inserting race result: {e}")
@@ -294,10 +158,6 @@ class MySQLDatabase:
     
     def insert_driver_price(self, driver_number: int, season: int, race_week: int, price: float) -> bool:
         """Insert driver price data"""
-        if not self.ensure_connection():
-            logger.error("Cannot insert driver price: no database connection")
-            return False
-            
         try:
             cursor = self.connection.cursor()
             query = """
@@ -306,7 +166,6 @@ class MySQLDatabase:
             """
             cursor.execute(query, (driver_number, season, race_week, price))
             self.connection.commit()
-            logger.info(f"Driver price for driver {driver_number} inserted successfully")
             return True
         except Error as e:
             logger.error(f"Error inserting driver price: {e}")
@@ -314,10 +173,6 @@ class MySQLDatabase:
     
     def get_training_data(self) -> Optional[pd.DataFrame]:
         """Get data for training the model"""
-        if not self.ensure_connection():
-            logger.error("Cannot fetch training data: no database connection")
-            return None
-            
         try:
             query = """
                 SELECT 
@@ -632,7 +487,7 @@ def predict_driver_performance(model, scaler, label_encoder, feature_names,
         return 0.0
 
 def main():
-    """Main execution function"""
+    """Main execution function - simplified version"""
     try:
         # Initialize configuration
         config = Config()
@@ -642,44 +497,24 @@ def main():
         os.makedirs(config.data_save_path, exist_ok=True)
         
         # Initialize components
-        fetcher = F1DataFetcher(config)
+        fetcher = F1DataFetcher()
         db = MySQLDatabase(config)
         
         # Connect to database and create tables
         if not db.connect():
             logger.error("Failed to connect to database. Exiting.")
+            logger.info("Please check your MySQL credentials in the Config class")
             return
         
         if not db.create_tables():
             logger.error("Failed to create database tables. Exiting.")
             return
         
-        # Try to fetch real data first
-        logger.info("Attempting to fetch real F1 data...")
-        real_data_available = False
-        
-        try:
-            # Get session info from OpenF1
-            sessions = fetcher.get_session_info(2024)
-            if sessions:
-                logger.info(f"Found {len(sessions)} sessions from OpenF1")
-                real_data_available = True
-            
-            # Try to get driver data
-            drivers = fetcher.get_drivers(2024)
-            if drivers:
-                logger.info(f"Found {len(drivers)} drivers from OpenF1")
-                real_data_available = True
-                
-        except Exception as e:
-            logger.warning(f"Could not fetch real data: {e}")
-        
-        # If no real data, create sample data
-        if not real_data_available:
-            logger.info("No real data available, creating sample data for demonstration...")
-            if not create_sample_data(db, fetcher):
-                logger.error("Failed to create sample data. Exiting.")
-                return
+        # Create sample data for demonstration
+        logger.info("Creating sample data for demonstration...")
+        if not create_sample_data(db, fetcher):
+            logger.error("Failed to create sample data. Exiting.")
+            return
         
         # Get training data
         training_data = db.get_training_data()
@@ -689,7 +524,6 @@ def main():
             return
         
         logger.info(f"Training data shape: {training_data.shape}")
-        logger.info(f"Columns: {list(training_data.columns)}")
         
         # Preprocess data
         try:
@@ -709,15 +543,15 @@ def main():
         train_dataset = F1Dataset(X_train, y_train)
         val_dataset = F1Dataset(X_test, y_test)
         
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
         
         # Initialize and train model
         model = CostEffectivenessModel(input_size=len(available_features))
         trainer = F1ModelTrainer(model, model_save_path=config.model_save_path)
         
         logger.info("Training model...")
-        trainer.train_model(train_loader, val_loader, epochs=100)
+        trainer.train_model(train_loader, val_loader, epochs=config.epochs, learning_rate=config.learning_rate)
         
         # Make predictions
         predictions = trainer.predict(X_test)
@@ -748,8 +582,8 @@ def main():
                 'model_state_dict': model.state_dict(),
                 'model_config': {
                     'input_size': len(available_features),
-                    'hidden_sizes': [64, 32, 16],
-                    'dropout_rate': 0.2
+                    'hidden_sizes': config.hidden_sizes,
+                    'dropout_rate': config.dropout_rate
                 },
                 'feature_names': available_features,
                 'scaler_path': scaler_path,
@@ -760,6 +594,7 @@ def main():
             logger.error(f"Failed to save model: {e}")
         
         logger.info("Model training completed successfully!")
+        logger.info("You can now run: python3 example_usage.py")
         
     except Exception as e:
         logger.error(f"Unexpected error in main: {e}")
