@@ -23,8 +23,8 @@ class Config:
         # Database - change these to match your MySQL setup
         self.db_host = 'localhost'
         self.db_name = 'f1_data'
-        self.db_user = 'root'  # or your MySQL username
-        self.db_password = ''   # your MySQL password here
+        self.db_user = 'root'  
+        self.db_password = 'PizzaKid1!'   # your MySQL password here
         
         # File paths
         self.model_save_path = './models'
