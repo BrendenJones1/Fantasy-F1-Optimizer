@@ -2,7 +2,7 @@
 
 A machine learning-powered Fantasy F1 team optimizer that uses real F1 race data and live Fantasy F1 prices to predict driver cost-effectiveness and help you build the optimal fantasy team.
 
-## �� Features
+## Features
 
 - **Real F1 Data**: Uses actual race results from 2023-2024 F1 seasons
 - **Live Fantasy F1 Prices**: Integration with official Fantasy F1 API
