@@ -134,7 +134,7 @@ To use live prices from the Fantasy F1 API:
 See `FANTASY_F1_API_SETUP.md` for detailed setup instructions.
 
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
