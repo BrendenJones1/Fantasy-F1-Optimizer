@@ -11,13 +11,7 @@ A machine learning-powered Fantasy F1 team optimizer that uses real F1 race data
 - **Team Optimization**: Recommends optimal driver combinations within budget
 - **Real-time Ready**: Live price updates and market analysis
 
-## �� **MAJOR UPDATE: Fantasy F1 API Integration**
-
-We now have **official Fantasy F1 API integration**! The system can fetch live driver prices directly from the Fantasy F1 platform.
-
-**API Documentation**: [F1 Fantasy API](https://documenter.getpostman.com/view/11462073/TzY68Dsi)
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.8+
@@ -64,15 +58,15 @@ We now have **official Fantasy F1 API integration**! The system can fetch live d
    python3 example_usage.py
    ```
 
-## 📊 Current Status
+## Current Status
 
-- ✅ **Real F1 Data**: Model trained on 174 real race records from 9 F1 races
-- ✅ **Active Drivers**: 18 current F1 drivers (2024 season)
-- ✅ **Fantasy F1 API**: Live price integration ready
-- ✅ **Model Performance**: MSE=0.0574, MAE=0.2038
-- ✅ **Production Ready**: No sample data, only real race results
+- **Real F1 Data**: Model trained on 174 real race records from 9 F1 races
+- **Active Drivers**: 18 current F1 drivers (2024 season)
+- **Fantasy F1 API**: Live price integration ready
+- **Model Performance**: MSE=0.0574, MAE=0.2038
+- **Production Ready**: No sample data, only real race results
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 Fantasy-F1-Optimizer/
@@ -96,7 +90,7 @@ Fantasy-F1-Optimizer/
 └── PROJECT_STATUS.md                  # Current status
 ```
 
-## 🎯 Usage
+## Usage
 
 ### Basic Usage (Mock Prices)
 ```bash
@@ -113,24 +107,8 @@ python3 example_usage_with_fantasy_api.py
 python3 retrain_with_real_data.py
 ```
 
-## 🔮 Next Steps
 
-### Immediate (High Priority)
-1. **✅ Fantasy F1 API Integration** - COMPLETED!
-2. **🔄 Docker Containerization** - Package for easy deployment
-3. **🔄 Web Frontend** - Build user interface for team selection
-
-### Medium Priority
-4. **🔄 Advanced Features** - Qualifying data, practice sessions, weather
-5. **🔄 Performance Optimization** - Caching, async API calls
-6. **🔄 Testing Suite** - Unit tests, integration tests
-
-### Future Enhancements
-7. **🔄 Mobile App** - React Native or Flutter app
-8. **🔄 Social Features** - Share teams, leaderboards
-9. **🔄 Analytics Dashboard** - Performance tracking, trends
-
-## 📈 Sample Output
+## Sample Output
 
 ```
 🏆 Best Value: Carlos SAINZ (Williams)
@@ -144,7 +122,7 @@ python3 retrain_with_real_data.py
    Average CE per Driver: 0.4526
 ```
 
-## 🔑 Fantasy F1 API Setup
+## Fantasy F1 API Setup
 
 To use live prices from the Fantasy F1 API:
 
@@ -155,25 +133,15 @@ To use live prices from the Fantasy F1 API:
 
 See `FANTASY_F1_API_SETUP.md` for detailed setup instructions.
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🏎️ Data Sources
+## Data Sources
 
 - **F1 Race Data**: [OpenF1 API](https://api.openf1.org/)
 - **Fantasy F1 Prices**: [Official Fantasy F1 API](https://documenter.getpostman.com/view/11462073/TzY68Dsi)
 - **Driver Information**: Real F1 race results and positions
 - **Fantasy Points**: Calculated using official F1 Fantasy rules
 
----
-
-*Built with ❤️ for F1 fans and fantasy players*
