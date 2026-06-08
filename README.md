@@ -85,9 +85,6 @@ Fantasy-F1-Optimizer/
 ├── database_setup.sql                 # Database schema
 ├── .env.template                      # Environment template
 ├── README.md                          # This file
-├── NEXT_STEPS.md                      # Development roadmap
-├── FANTASY_F1_API_SETUP.md           # Fantasy F1 API setup guide
-└── PROJECT_STATUS.md                  # Current status
 ```
 
 ## Usage
@@ -130,8 +127,6 @@ To use live prices from the Fantasy F1 API:
 2. **Configure Credentials**: Edit `app/FantasyF1API.py` with your email/password
 3. **Test Integration**: Run `python3 app/FantasyF1API.py`
 4. **Use Live Prices**: Run `python3 example_usage_with_fantasy_api.py`
-
-See `FANTASY_F1_API_SETUP.md` for detailed setup instructions.
 
 
 ## License
