@@ -88,6 +88,36 @@ class ConstructorPrice(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class PredictionLog(Base):
+    """Predictions made *before* a race, kept so they can be scored against the real outcome."""
+    __tablename__ = "prediction_log"
+    __table_args__ = (UniqueConstraint("race_id", "driver_id", "model", "trained_through",
+                                       name="uq_prediction_log"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    race_id: Mapped[int] = mapped_column(ForeignKey("races.id", ondelete="CASCADE"))
+    driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.driver_id"))
+    constructor_id: Mapped[str] = mapped_column(ForeignKey("constructors.constructor_id"))
+    model: Mapped[str] = mapped_column(String(32))
+    trained_through: Mapped[str] = mapped_column(String(16))  # "season-round" of the last training race
+    predicted_points: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TeamRecommendationLog(Base):
+    __tablename__ = "team_recommendation_log"
+    __table_args__ = (UniqueConstraint("race_id", "model", "trained_through", "budget", "price_source",
+                                       name="uq_team_recommendation"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    race_id: Mapped[int] = mapped_column(ForeignKey("races.id", ondelete="CASCADE"))
+    model: Mapped[str] = mapped_column(String(32))
+    trained_through: Mapped[str] = mapped_column(String(16))
+    budget: Mapped[float] = mapped_column(Float)
+    price_source: Mapped[str] = mapped_column(String(64))
+    expected_points: Mapped[float] = mapped_column(Float)
+    payload: Mapped[str] = mapped_column(Text)  # JSON: drivers, constructors, DRS pick, prices
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class IngestionRun(Base):
     """Audit trail of scheduled ingestion attempts."""
     __tablename__ = "ingestion_runs"

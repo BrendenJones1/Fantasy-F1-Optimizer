@@ -7,7 +7,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
-from f1opt import prices, serving
+from f1opt import prices, prospective, serving
 from f1opt.config import Settings, get_settings
 from f1opt.db import Constructor, Driver, make_engine, make_session_factory
 from f1opt.ingestion import run_ingestion
@@ -47,6 +47,10 @@ def run_cycle(settings: Settings, session_factory=None, client=None) -> None:
         if run.new_races > 0 or model_missing:
             serving.train_and_save(session, settings.model_dir)
         refresh_prices(session, settings)
+        try:
+            prospective.log_next_race(session, serving.ModelStore(settings.model_dir), settings.budget)
+        except Exception:  # noqa: BLE001 - logging must never fail a cycle
+            logger.exception("prediction logging failed")
 
 
 def _safe_cycle(settings: Settings) -> None:
