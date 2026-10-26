@@ -42,8 +42,9 @@ def build_weekend_table(client: JolpicaClient, seasons: Iterable[int],
             rnd = race["round"]
             results = race["Results"]
             field_size = len(results)
-            quali_pos = {q["Driver"]["driverId"]: _int(q["position"], None)
-                         for q in qualis.get(rnd, {}).get("QualifyingResults", [])}
+            quali_rows = qualis.get(rnd, {}).get("QualifyingResults", [])
+            quali_pos = {q["Driver"]["driverId"]: _int(q["position"], None) for q in quali_rows}
+            set_q1_time = {q["Driver"]["driverId"]: bool(q.get("Q1")) for q in quali_rows}
             sprint_rows = {s["Driver"]["driverId"]: s
                            for s in sprints.get(rnd, {}).get("SprintResults", [])}
 
@@ -56,14 +57,18 @@ def build_weekend_table(client: JolpicaClient, seasons: Iterable[int],
                 race_pts = scoring.session_points(
                     position, res["positionText"], grid, field_size,
                     scoring.RACE_POINTS, fastest, scoring.RACE_FASTEST_LAP_POINTS)
-                q_pts = scoring.qualifying_points(quali_pos.get(driver))
+                # No time set in Q1 (or absent from a published qualifying result) costs -5.
+                no_time = bool(quali_rows) and not set_q1_time.get(driver, False)
+                q_pts = scoring.qualifying_points(quali_pos.get(driver), has_time=not no_time)
                 sprint_pts = 0.0
                 if driver in sprint_rows:
                     s = sprint_rows[driver]
                     sprint_pts = scoring.session_points(
                         _int(s["position"]), s["positionText"], _int(s["grid"]),
-                        len(sprint_rows), scoring.SPRINT_POINTS, False,
-                        scoring.SPRINT_FASTEST_LAP_POINTS)
+                        len(sprint_rows), scoring.SPRINT_POINTS,
+                        s.get("FastestLap", {}).get("rank") == "1", scoring.SPRINT_FASTEST_LAP_POINTS,
+                        not_classified_penalty=scoring.sprint_penalty(season),
+                        max_positions_lost=scoring.SPRINT_MAX_POSITIONS_LOST)
 
                 rows.append({
                     "season": season,

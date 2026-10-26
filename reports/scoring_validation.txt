@@ -1,0 +1,3 @@
+Reconstructed vs official 2026 season totals through round 18, 22 drivers.
+Pearson r = 0.991, Spearman = 0.984.
+Official minus reconstructed: mean 5.9 points per race (sd 1.7 across drivers); consistent with overtakes (+1 each) and Driver of the Day (+10), which are not in result tables.
