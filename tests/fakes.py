@@ -11,17 +11,21 @@ def _result(driver, constructor, pos, grid, text=None, fastest=False):
             "FastestLap": {"rank": "1" if fastest else "2"}}
 
 
-def make_season(season: int, completed_rounds: int, total_rounds: int = 3) -> Dict[str, List[dict]]:
-    drivers = [("alpha", "red"), ("bravo", "red"), ("charlie", "blue"), ("delta", "blue")]
+def make_season(season: int, completed_rounds: int, total_rounds: int = 3,
+                n_drivers: int = 4) -> Dict[str, List[dict]]:
+    if n_drivers == 4:
+        drivers = [("alpha", "red"), ("bravo", "red"), ("charlie", "blue"), ("delta", "blue")]
+    else:
+        drivers = [(f"drv{i}", f"team{i // 2}") for i in range(n_drivers)]
     schedule, results, qualis = [], [], []
     for rnd in range(1, total_rounds + 1):
         race = {"season": str(season), "round": str(rnd), "raceName": f"GP {rnd}",
                 "date": f"{season}-0{rnd}-15", "Circuit": {"circuitId": f"circuit{rnd}"}}
         schedule.append(dict(race))
         if rnd <= completed_rounds:
-            order = drivers[rnd % 4:] + drivers[:rnd % 4]
+            order = drivers[rnd % n_drivers:] + drivers[:rnd % n_drivers]
             results.append({**race, "Results": [
-                _result(d, c, i + 1, 4 - i, fastest=(i == 0)) for i, (d, c) in enumerate(order)]})
+                _result(d, c, i + 1, n_drivers - i, fastest=(i == 0)) for i, (d, c) in enumerate(order)]})
             qualis.append({**race, "QualifyingResults": [
                 {"position": str(i + 1), "Driver": {"driverId": d}} for i, (d, _) in enumerate(drivers)]})
     return {"schedule": schedule, "results": results, "qualifying": qualis, "sprint": []}
