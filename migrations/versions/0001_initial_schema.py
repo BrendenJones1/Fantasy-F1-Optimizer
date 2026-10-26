@@ -33,7 +33,7 @@ def upgrade() -> None:
     sa.Column('status', sa.String(length=16), nullable=False),
     sa.Column('attempt', sa.Integer(), nullable=False),
     sa.Column('seasons', sa.String(length=64), nullable=True),
-    sa.Column('races_completed', sa.Integer(), nullable=False),
+    sa.Column('new_races', sa.Integer(), nullable=False),
     sa.Column('results_upserted', sa.Integer(), nullable=False),
     sa.Column('error', sa.Text(), nullable=True),
     sa.PrimaryKeyConstraint('id')

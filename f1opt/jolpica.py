@@ -73,3 +73,12 @@ class JolpicaClient:
         cache_file.write_text(json.dumps(out))
         logger.info("Fetched %s (%d races)", path, len(out))
         return out
+
+    def fetch_schedule(self, season: int, refresh: bool = False) -> List[Dict[str, Any]]:
+        """Race calendar for a season (includes races that have not happened yet)."""
+        cache_file = self.cache_dir / f"{season}.json"
+        if cache_file.exists() and not refresh:
+            return json.loads(cache_file.read_text())
+        races = self._get(str(season), 0)["RaceTable"]["Races"]
+        cache_file.write_text(json.dumps(races))
+        return races

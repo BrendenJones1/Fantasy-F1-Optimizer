@@ -97,7 +97,7 @@ class IngestionRun(Base):
     status: Mapped[str] = mapped_column(String(16))  # running | success | failed
     attempt: Mapped[int] = mapped_column(Integer, default=1)
     seasons: Mapped[Optional[str]] = mapped_column(String(64))
-    races_completed: Mapped[int] = mapped_column(Integer, default=0)
+    new_races: Mapped[int] = mapped_column(Integer, default=0)
     results_upserted: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[Optional[str]] = mapped_column(Text)
 
