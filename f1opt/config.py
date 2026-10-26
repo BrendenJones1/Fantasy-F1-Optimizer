@@ -17,6 +17,7 @@ class Settings:
     cache_dir: Path = field(default_factory=lambda: Path(_env("CACHE_DIR", "data/cache/jolpica")))
     first_season: int = field(default_factory=lambda: int(_env("FIRST_SEASON", "2018")))
     budget: float = field(default_factory=lambda: float(_env("BUDGET_CAP", "100.0")))
+    demo_prices: bool = field(default_factory=lambda: _env("DEMO_PRICES", "0") == "1")
     ingest_cron: str = field(default_factory=lambda: _env("INGEST_CRON", "0 6 * * *"))  # daily 06:00 UTC
 
 
