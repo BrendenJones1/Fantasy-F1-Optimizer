@@ -27,7 +27,7 @@ def make_season(season: int, completed_rounds: int, total_rounds: int = 3,
             results.append({**race, "Results": [
                 _result(d, c, i + 1, n_drivers - i, fastest=(i == 0)) for i, (d, c) in enumerate(order)]})
             qualis.append({**race, "QualifyingResults": [
-                {"position": str(i + 1), "Driver": {"driverId": d}} for i, (d, _) in enumerate(drivers)]})
+                {"position": str(i + 1), "Q1": "1:30.000", "Driver": {"driverId": d}} for i, (d, _) in enumerate(drivers)]})
     return {"schedule": schedule, "results": results, "qualifying": qualis, "sprint": []}
 
 
