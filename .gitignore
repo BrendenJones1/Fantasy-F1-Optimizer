@@ -40,6 +40,8 @@ Thumbs.db
 models/
 data/*
 !data/processed/
+!data/prices/
+!data/validation/
 *.pth
 *.pkl
 
