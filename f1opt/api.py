@@ -15,7 +15,8 @@ from f1opt import serving
 from f1opt.config import Settings, get_settings
 from f1opt.db import make_engine, make_session_factory
 from f1opt.evaluation import bootstrap_ci
-from f1opt.optimizer import Asset, InfeasibleTeam, greedy_team, optimize_team
+from f1opt.optimizer import InfeasibleTeam
+from f1opt.recommend import NotEnoughPrices, recommend_team
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +82,8 @@ class ModelMetric(BaseModel):
 
 
 class MetricsOut(BaseModel):
-    deployed_model: str
-    deployed_model_metadata: dict
+    deployed_model: Optional[str] = None
+    deployed_model_metadata: Optional[dict] = None
     backtest_races: int
     backtest_description: str
     models: List[ModelMetric]
@@ -159,50 +160,39 @@ def create_app(settings: Optional[Settings] = None, session_factory: Optional[se
     def team(budget: Optional[float] = Query(None, gt=0, le=1000, description="budget cap in $M"),
              session: Session = Depends(get_session), request: Request = None):
         budget = budget or request.app.state.settings.budget
-        race, preds = serving.predict_next_race(session, request.app.state.store)
-        drv_prices, con_prices = price_mod.latest_prices(session, race)
-
-        drivers = [Asset(r.driver_id, drv_prices[r.driver_id][0], float(r.predicted_points))
-                   for r in preds.itertuples() if r.driver_id in drv_prices]
-        # Constructor points: both cars' predicted points (an approximation; pit-stop bonuses are not modelled).
-        con_points = preds.groupby("constructor_id")["predicted_points"].sum()
-        constructors = [Asset(cid, con_prices[cid][0], float(con_points[cid]))
-                        for cid in con_points.index if cid in con_prices]
-        if len(drivers) < 5 or len(constructors) < 2:
-            raise HTTPException(409, f"Not enough prices loaded for {race.name} {race.season} "
-                                     f"({len(drivers)} drivers, {len(constructors)} constructors). "
-                                     "Load prices with scripts/load_prices.py.")
         try:
-            selection = optimize_team(drivers, constructors, budget)
+            rec = recommend_team(session, request.app.state.store, budget)
+        except NotEnoughPrices as exc:
+            raise HTTPException(409, str(exc))
         except InfeasibleTeam as exc:
             raise HTTPException(422, str(exc))
-        greedy = greedy_team(drivers, constructors, budget)
-
-        names = dict(zip(preds["driver_id"], preds["name"]))
-        cnames = dict(zip(preds["constructor_id"], preds["constructor_name"]))
-        sources = sorted({s for _, s in drv_prices.values()} | {s for _, s in con_prices.values()})
+        sel, names, cnames = rec.selection, rec.driver_names, rec.constructor_names
         note = ("Prices are DEMO prices derived from recent form, not the official game's."
-                if price_mod.DEMO_SOURCE in sources else "Prices from the listed source(s).")
+                if price_mod.DEMO_SOURCE in rec.price_sources else "Prices from the listed source(s).")
         return TeamOut(
-            race=_race_out(race), budget=budget, total_price=round(selection.total_price, 2),
-            expected_points=round(selection.expected_points, 2), drs_driver=selection.drs_driver,
+            race=_race_out(rec.race), budget=budget, total_price=round(sel.total_price, 2),
+            expected_points=round(sel.expected_points, 2), drs_driver=sel.drs_driver,
             drivers=[PickedAsset(id=a.id, name=names[a.id], price=a.price,
-                                 predicted_points=round(a.points, 2), drs=a.id == selection.drs_driver)
-                     for a in selection.drivers],
+                                 predicted_points=round(a.points, 2), drs=a.id == sel.drs_driver)
+                     for a in sel.drivers],
             constructors=[PickedAsset(id=a.id, name=cnames[a.id], price=a.price,
-                                      predicted_points=round(a.points, 2)) for a in selection.constructors],
-            price_sources=sources,
-            greedy_baseline_points=round(greedy.expected_points, 2) if greedy else None, note=note)
+                                      predicted_points=round(a.points, 2)) for a in sel.constructors],
+            price_sources=rec.price_sources,
+            greedy_baseline_points=round(rec.greedy.expected_points, 2) if rec.greedy else None, note=note)
 
     @app.get("/metrics", response_model=MetricsOut)
     def metrics(request: Request):
-        loaded = request.app.state.store.get()
+        try:
+            loaded = request.app.state.store.get()
+        except serving.ModelNotTrained:
+            loaded = None  # the benchmark is still reportable before the first training run
         path = Path(request.app.state.settings.reports_dir) / "per_race_metrics.csv"
         if not path.exists():
             raise HTTPException(503, f"{path} not found; run scripts/run_evaluation.py")
         n_races, rows = _backtest_summary(str(path), path.stat().st_mtime)
         return MetricsOut(
-            deployed_model=loaded.metadata["model"], deployed_model_metadata=loaded.metadata,
+            deployed_model=loaded.metadata["model"] if loaded else None,
+            deployed_model_metadata=loaded.metadata if loaded else None,
             backtest_races=n_races,
             backtest_description=("Expanding-window backtest, one fold per race; per-race metrics averaged, "
                                   "95% bootstrap CI resampling races. See reports/results_table.md."),

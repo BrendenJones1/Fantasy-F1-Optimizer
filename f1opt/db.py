@@ -6,6 +6,7 @@ from sqlalchemy import (Boolean, Date, DateTime, Float, ForeignKey, Index, Integ
                         Text, UniqueConstraint, create_engine)
 from sqlalchemy.dialects import mysql, sqlite
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -88,6 +89,36 @@ class ConstructorPrice(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class PredictionLog(Base):
+    """Predictions made *before* a race, kept so they can be scored against the real outcome."""
+    __tablename__ = "prediction_log"
+    __table_args__ = (UniqueConstraint("race_id", "driver_id", "model", "trained_through",
+                                       name="uq_prediction_log"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    race_id: Mapped[int] = mapped_column(ForeignKey("races.id", ondelete="CASCADE"))
+    driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.driver_id"))
+    constructor_id: Mapped[str] = mapped_column(ForeignKey("constructors.constructor_id"))
+    model: Mapped[str] = mapped_column(String(32))
+    trained_through: Mapped[str] = mapped_column(String(16))  # "season-round" of the last training race
+    predicted_points: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TeamRecommendationLog(Base):
+    __tablename__ = "team_recommendation_log"
+    __table_args__ = (UniqueConstraint("race_id", "model", "trained_through", "budget", "price_source",
+                                       name="uq_team_recommendation"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    race_id: Mapped[int] = mapped_column(ForeignKey("races.id", ondelete="CASCADE"))
+    model: Mapped[str] = mapped_column(String(32))
+    trained_through: Mapped[str] = mapped_column(String(16))
+    budget: Mapped[float] = mapped_column(Float)
+    price_source: Mapped[str] = mapped_column(String(64))
+    expected_points: Mapped[float] = mapped_column(Float)
+    payload: Mapped[str] = mapped_column(Text)  # JSON: drivers, constructors, DRS pick, prices
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class IngestionRun(Base):
     """Audit trail of scheduled ingestion attempts."""
     __tablename__ = "ingestion_runs"
@@ -116,7 +147,8 @@ def upsert(session: Session, model, rows: Iterable[dict], key_columns: list, upd
     Uses the dialect's native upsert (MySQL ON DUPLICATE KEY UPDATE, SQLite ON CONFLICT) so that
     re-running ingestion never duplicates rows. ``key_columns`` must match a unique constraint.
     """
-    rows = list(rows)
+    # Consistent key order keeps concurrent writers from taking row locks in opposite orders.
+    rows = sorted(rows, key=lambda r: tuple(str(r[c]) for c in key_columns))
     if not rows:
         return 0
     dialect = session.get_bind().dialect.name
@@ -132,3 +164,23 @@ def upsert(session: Session, model, rows: Iterable[dict], key_columns: list, upd
         raise NotImplementedError(f"upsert not implemented for {dialect}")
     session.execute(stmt)
     return len(rows)
+
+
+MYSQL_RETRYABLE = {1213, 1205}  # deadlock found, lock wait timeout
+
+
+def run_with_retry(session: Session, fn, attempts: int = 4, sleep=None):
+    """Run ``fn()`` and commit; on a MySQL deadlock or lock timeout, roll back and try again."""
+    import time
+    sleep = sleep or time.sleep
+    for attempt in range(1, attempts + 1):
+        try:
+            result = fn()
+            session.commit()
+            return result
+        except OperationalError as exc:
+            session.rollback()
+            code = exc.orig.args[0] if getattr(exc.orig, "args", None) else None
+            if code not in MYSQL_RETRYABLE or attempt == attempts:
+                raise
+            sleep(0.2 * attempt)
