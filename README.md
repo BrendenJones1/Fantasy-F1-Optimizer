@@ -92,7 +92,7 @@ python scripts/validate_scoring.py      # scoring check against official season 
 Plots and per-race data are in `reports/` (`metrics_with_ci.png`, `rolling_spearman.png`, `paired_differences.csv`).
 
 - All three learned models beat the naive baseline. Paired over the same races, MAE improves by about 1.4 points and Spearman by 0.07 to 0.08, with intervals that exclude zero.
-- **The neural network does not beat the simpler models.** Ridge, LightGBM and the MLP are statistically close. Ridge has slightly better MAE and Spearman than the MLP (paired MAE difference 0.09, p = 0.03, one of nine comparisons, so weak evidence).
+- **The neural network does not beat the simpler models.** Ridge, LightGBM and the MLP are statistically close. Ridge has slightly better MAE and Spearman than the MLP (paired MAE difference 0.09, p = 0.03, among several comparisons, so weak evidence).
 - **Deployed model: Ridge.** It has the best point estimates on MAE, MSE and Spearman, is tied on the rest, trains in milliseconds, and can be inspected. There is no accuracy reason to pay for a heavier model.
 
 How strong is that? Pooled R² is 0.38 and MAE is 8.9 points against 11.8 for a constant prediction. The median per-race Spearman is 0.60 (93% of races above 0.3). A random five-driver pick captures about 24% of the best five drivers' points, and the model captures 75%. Most of what it learns is persistent car and driver pace. It cannot predict retirements, safety cars or first-lap incidents, which dominate the remaining error.
@@ -107,7 +107,7 @@ The reconstructed points are checked against the game's own 2026 season totals f
 - **Overtakes and Driver of the Day are missing from the target.** They are mostly a constant offset; the driver-specific part (sd about 1.7 points per race) is small next to the model's 8.9 point MAE.
 - **Constructor points** are the sum of the two drivers' predicted points. Qualifying-progress and pit-stop bonuses are not modelled.
 - **Entry list** for the next race is taken from the last completed race.
-- **Prospective check.** Pre-race predictions and teams are logged, and `python scripts/prospective_report.py` scores them once the race is ingested. Only a few races have been logged so far.
+- **Prospective check.** Pre-race predictions and teams are logged, and `python scripts/prospective_report.py` scores them once the race is ingested. One race (Mexico City 2026) has been logged and is not yet scored.
 
 ## Data
 
