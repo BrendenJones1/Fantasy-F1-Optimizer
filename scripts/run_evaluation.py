@@ -11,7 +11,8 @@ import pandas as pd
 
 from f1opt.evaluation import backtest, bootstrap_ci, paired_bootstrap_diff
 from f1opt.features import FEATURE_COLUMNS, TARGET, build_features
-from f1opt.models import MODEL_FACTORIES, make_lightgbm
+from f1opt.models import get_model_factories
+from f1opt.models_heavy import make_lightgbm
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -24,6 +25,7 @@ args = parser.parse_args()
 
 out = Path(args.out)
 out.mkdir(parents=True, exist_ok=True)
+MODEL_FACTORIES = get_model_factories()
 BASELINE = "Naive (rolling-3 mean)"
 METRICS = {"mae": "MAE (lower is better)", "mse": "MSE (lower is better)",
            "spearman": "Spearman rank corr. (higher is better)",
