@@ -67,3 +67,31 @@ def test_fantasy_api_source_requires_cookie(monkeypatch):
     monkeypatch.delenv("F1_FANTASY_COOKIE", raising=False)
     with pytest.raises(RuntimeError):
         prices.FantasyApiPriceSource(2025, {}, {}).fetch()
+
+
+def test_store_prices_retries_on_mysql_deadlock(populated, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    race = serving.next_race(populated)
+    real_upsert, calls = prices.upsert, {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OperationalError("INSERT", {}, Exception(1213, "Deadlock found"))
+        return real_upsert(*args, **kwargs)
+
+    monkeypatch.setattr(prices, "upsert", flaky)
+    n = prices.store_prices(populated, race, prices.PriceSheet(drivers={"alpha": 12.0}), "csv")
+    assert n == 1 and calls["n"] == 3  # failed driver upsert, retried driver + constructor upserts
+
+
+def test_non_retryable_database_errors_propagate(populated):
+    from sqlalchemy.exc import OperationalError
+    from f1opt.db import run_with_retry
+
+    def boom():
+        raise OperationalError("INSERT", {}, Exception(1045, "Access denied"))
+
+    with pytest.raises(OperationalError):
+        run_with_retry(populated, boom, sleep=lambda s: None)

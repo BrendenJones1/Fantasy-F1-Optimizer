@@ -6,6 +6,7 @@ from sqlalchemy import (Boolean, Date, DateTime, Float, ForeignKey, Index, Integ
                         Text, UniqueConstraint, create_engine)
 from sqlalchemy.dialects import mysql, sqlite
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -146,7 +147,8 @@ def upsert(session: Session, model, rows: Iterable[dict], key_columns: list, upd
     Uses the dialect's native upsert (MySQL ON DUPLICATE KEY UPDATE, SQLite ON CONFLICT) so that
     re-running ingestion never duplicates rows. ``key_columns`` must match a unique constraint.
     """
-    rows = list(rows)
+    # Consistent key order keeps concurrent writers from taking row locks in opposite orders.
+    rows = sorted(rows, key=lambda r: tuple(str(r[c]) for c in key_columns))
     if not rows:
         return 0
     dialect = session.get_bind().dialect.name
@@ -162,3 +164,23 @@ def upsert(session: Session, model, rows: Iterable[dict], key_columns: list, upd
         raise NotImplementedError(f"upsert not implemented for {dialect}")
     session.execute(stmt)
     return len(rows)
+
+
+MYSQL_RETRYABLE = {1213, 1205}  # deadlock found, lock wait timeout
+
+
+def run_with_retry(session: Session, fn, attempts: int = 4, sleep=None):
+    """Run ``fn()`` and commit; on a MySQL deadlock or lock timeout, roll back and try again."""
+    import time
+    sleep = sleep or time.sleep
+    for attempt in range(1, attempts + 1):
+        try:
+            result = fn()
+            session.commit()
+            return result
+        except OperationalError as exc:
+            session.rollback()
+            code = exc.orig.args[0] if getattr(exc.orig, "args", None) else None
+            if code not in MYSQL_RETRYABLE or attempt == attempts:
+                raise
+            sleep(0.2 * attempt)

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from f1opt import serving
-from f1opt.db import (PredictionLog, Race, Result, TeamRecommendationLog, upsert, utcnow)
+from f1opt.db import (PredictionLog, Race, Result, TeamRecommendationLog, run_with_retry, upsert, utcnow)
 from f1opt.evaluation import race_metrics
 from f1opt.optimizer import InfeasibleTeam
 from f1opt.recommend import NotEnoughPrices, recommend_team
@@ -30,8 +30,9 @@ def log_next_race(session: Session, store: serving.ModelStore, budget: float) ->
     rows = [{"race_id": race.id, "driver_id": r.driver_id, "constructor_id": r.constructor_id,
              "model": loaded.metadata["model"], "trained_through": version,
              "predicted_points": float(r.predicted_points), "created_at": now} for r in preds.itertuples()]
-    upsert(session, PredictionLog, rows, ["race_id", "driver_id", "model", "trained_through"],
-           ["constructor_id", "predicted_points", "created_at"])
+    run_with_retry(session, lambda: upsert(
+        session, PredictionLog, rows, ["race_id", "driver_id", "model", "trained_through"],
+        ["constructor_id", "predicted_points", "created_at"]))
 
     team_logged = False
     try:
@@ -42,16 +43,17 @@ def log_next_race(session: Session, store: serving.ModelStore, budget: float) ->
             "drivers": [{"id": a.id, "price": a.price, "predicted_points": a.points} for a in sel.drivers],
             "constructors": [{"id": a.id, "price": a.price, "predicted_points": a.points}
                              for a in sel.constructors]}
-        upsert(session, TeamRecommendationLog, [{
+        team_row = {
             "race_id": race.id, "model": loaded.metadata["model"], "trained_through": version,
             "budget": budget, "price_source": ",".join(rec.price_sources),
-            "expected_points": sel.expected_points, "payload": json.dumps(payload), "created_at": now}],
+            "expected_points": sel.expected_points, "payload": json.dumps(payload), "created_at": now}
+        run_with_retry(session, lambda: upsert(
+            session, TeamRecommendationLog, [team_row],
             ["race_id", "model", "trained_through", "budget", "price_source"],
-            ["expected_points", "payload", "created_at"])
+            ["expected_points", "payload", "created_at"]))
         team_logged = True
     except (NotEnoughPrices, InfeasibleTeam) as exc:
         logger.info("no team logged for %s: %s", race.name, exc)
-    session.commit()
     logger.info("logged %d predictions for %s %d (team logged: %s)", len(rows), race.name, race.season, team_logged)
     return {"race_id": race.id, "predictions": len(rows), "team_logged": team_logged}
 

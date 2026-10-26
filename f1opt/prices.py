@@ -17,7 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from f1opt import serving
-from f1opt.db import Constructor, ConstructorPrice, Driver, DriverPrice, Race, upsert, utcnow
+from f1opt.db import (Constructor, ConstructorPrice, Driver, DriverPrice, Race, run_with_retry, upsert,
+                      utcnow)
 
 logger = logging.getLogger(__name__)
 
@@ -123,11 +124,13 @@ def store_prices(session: Session, race: Race, sheet: PriceSheet, source: str) -
     skipped = len(sheet.drivers) + len(sheet.constructors) - len(drivers) - len(constructors)
     if skipped:
         logger.warning("skipped %d prices with unknown ids", skipped)
-    n = upsert(session, DriverPrice, drivers, ["race_id", "driver_id", "source"], ["price", "captured_at"])
-    n += upsert(session, ConstructorPrice, constructors, ["race_id", "constructor_id", "source"],
-                ["price", "captured_at"])
-    session.commit()
-    return n
+
+    def write() -> int:
+        n = upsert(session, DriverPrice, drivers, ["race_id", "driver_id", "source"], ["price", "captured_at"])
+        return n + upsert(session, ConstructorPrice, constructors, ["race_id", "constructor_id", "source"],
+                          ["price", "captured_at"])
+
+    return run_with_retry(session, write)
 
 
 def _rank(source: str, captured_at) -> tuple:
