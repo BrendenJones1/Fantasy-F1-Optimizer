@@ -88,3 +88,14 @@ def test_model_not_trained_gives_503(engine, session, tmp_path):
     c = TestClient(create_app(settings, make_session_factory(engine), serving.ModelStore(settings.model_dir)))
     assert c.get("/predictions").status_code in (404, 503)
     assert c.get("/health").json()["model_ready"] is False
+
+
+def test_metrics_available_before_first_training(engine, tmp_path):
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    pd.DataFrame({"model": ["Ridge"] * 20, "race_index": list(range(20)), "mae": [8.0] * 20, "mse": [1.0] * 20,
+                  "spearman": [0.5] * 20, "top5_capture": [0.7] * 20}).to_csv(reports / "per_race_metrics.csv", index=False)
+    settings = Settings(database_url="unused", model_dir=tmp_path / "none", reports_dir=reports)
+    c = TestClient(create_app(settings, make_session_factory(engine), serving.ModelStore(settings.model_dir)))
+    body = c.get("/metrics").json()
+    assert body["deployed_model"] is None and body["models"][0]["model"] == "Ridge"

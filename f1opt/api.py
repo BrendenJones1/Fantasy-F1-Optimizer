@@ -82,8 +82,8 @@ class ModelMetric(BaseModel):
 
 
 class MetricsOut(BaseModel):
-    deployed_model: str
-    deployed_model_metadata: dict
+    deployed_model: Optional[str] = None
+    deployed_model_metadata: Optional[dict] = None
     backtest_races: int
     backtest_description: str
     models: List[ModelMetric]
@@ -182,13 +182,17 @@ def create_app(settings: Optional[Settings] = None, session_factory: Optional[se
 
     @app.get("/metrics", response_model=MetricsOut)
     def metrics(request: Request):
-        loaded = request.app.state.store.get()
+        try:
+            loaded = request.app.state.store.get()
+        except serving.ModelNotTrained:
+            loaded = None  # the benchmark is still reportable before the first training run
         path = Path(request.app.state.settings.reports_dir) / "per_race_metrics.csv"
         if not path.exists():
             raise HTTPException(503, f"{path} not found; run scripts/run_evaluation.py")
         n_races, rows = _backtest_summary(str(path), path.stat().st_mtime)
         return MetricsOut(
-            deployed_model=loaded.metadata["model"], deployed_model_metadata=loaded.metadata,
+            deployed_model=loaded.metadata["model"] if loaded else None,
+            deployed_model_metadata=loaded.metadata if loaded else None,
             backtest_races=n_races,
             backtest_description=("Expanding-window backtest, one fold per race; per-race metrics averaged, "
                                   "95% bootstrap CI resampling races. See reports/results_table.md."),
