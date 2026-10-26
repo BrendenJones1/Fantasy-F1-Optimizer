@@ -22,7 +22,7 @@ services:
       MYSQL_USER: f1
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-f1-dev-password}
       MYSQL_RANDOM_ROOT_PASSWORD: "yes"
-    ports: ["3307:3306"]   # 3307 on the host so it never clashes with a local MySQL
+    ports: ["${DB_PORT:-3307}:3306"]   # 3307 on the host so it never clashes with a local MySQL
     volumes: ["db_data:/var/lib/mysql"]
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
