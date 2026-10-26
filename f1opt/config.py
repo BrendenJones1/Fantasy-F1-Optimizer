@@ -11,7 +11,7 @@ def _env(name: str, default: str) -> str:
 @dataclass(frozen=True)
 class Settings:
     database_url: str = field(default_factory=lambda: _env(
-        "DATABASE_URL", "mysql+pymysql://f1:f1@127.0.0.1:3307/f1opt"))
+        "DATABASE_URL", "mysql+pymysql://f1:f1-dev-password@127.0.0.1:3307/f1opt"))
     model_dir: Path = field(default_factory=lambda: Path(_env("MODEL_DIR", "models")))
     reports_dir: Path = field(default_factory=lambda: Path(_env("REPORTS_DIR", "reports")))
     cache_dir: Path = field(default_factory=lambda: Path(_env("CACHE_DIR", "data/cache/jolpica")))
