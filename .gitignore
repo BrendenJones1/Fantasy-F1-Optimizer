@@ -45,3 +45,5 @@ data/*
 
 # Logs
 *.log 
+# Local environment
+.env

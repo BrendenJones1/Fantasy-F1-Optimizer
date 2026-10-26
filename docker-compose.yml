@@ -1,0 +1,58 @@
+name: f1opt
+
+x-app: &app
+  build: .
+  environment: &env
+    DATABASE_URL: mysql+pymysql://f1:${MYSQL_PASSWORD:-f1-dev-password}@db:3306/f1opt
+    MODEL_DIR: /models
+    CACHE_DIR: /cache/jolpica
+    BUDGET_CAP: ${BUDGET_CAP:-100}
+    INGEST_CRON: ${INGEST_CRON:-0 6 * * *}
+    DEMO_PRICES: ${DEMO_PRICES:-1}
+    F1_FANTASY_COOKIE: ${F1_FANTASY_COOKIE:-}
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: f1opt
+      MYSQL_USER: f1
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-f1-dev-password}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    ports: ["3307:3306"]   # 3307 on the host so it never clashes with a local MySQL
+    volumes: ["db_data:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  migrate:
+    build: .
+    environment: *env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    ports: ["${API_PORT:-8010}:8000"]   # host port; 8000 is often taken
+    volumes: ["models:/models:ro"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      retries: 6
+
+  scheduler:
+    <<: *app
+    command: ["python", "-m", "f1opt.scheduler"]
+    volumes: ["models:/models", "cache:/cache"]
+
+volumes:
+  db_data:
+  models:
+  cache:
