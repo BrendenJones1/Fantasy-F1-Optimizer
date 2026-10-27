@@ -52,18 +52,6 @@ def test_no_upcoming_race_raises(session):
         serving.next_race(session)
 
 
-@pytest.fixture
-def long_history(session):
-    """54 races of 12 drivers: enough for the calibrator (30 training races, 200+ residuals)."""
-    seasons = {y: make_season(y, 9, 9, n_drivers=12) for y in range(2018, 2024)}
-    seasons[2024] = make_season(2024, 0, 3, n_drivers=12)  # an upcoming race to predict
-    client = FakeClient(seasons)
-    for season in seasons:
-        ingestion.ingest_season(session, client, season, refresh=True)
-    session.commit()
-    return session
-
-
 def test_short_history_is_trained_without_a_calibrator(populated, tmp_path):
     meta = serving.train_and_save(populated, tmp_path)
     assert meta["calibration"] is None

@@ -38,6 +38,9 @@ def test_predictions_without_prices(client):
     assert (body["race"]["season"], body["race"]["round"]) == (2025, 4)
     assert len(body["drivers"]) == 4 and body["model"] == "Ridge"
     assert all(d["price"] is None for d in body["drivers"])
+    # The fixture's history is too short to calibrate, so no intervals are claimed.
+    assert body["interval_level"] is None
+    assert all(d["interval_low"] is None and d["interval_high"] is None for d in body["drivers"])
 
 
 def test_team_requires_prices(client):
@@ -99,3 +102,21 @@ def test_metrics_available_before_first_training(engine, tmp_path):
     c = TestClient(create_app(settings, make_session_factory(engine), serving.ModelStore(settings.model_dir)))
     body = c.get("/metrics").json()
     assert body["deployed_model"] is None and body["models"][0]["model"] == "Ridge"
+
+
+def test_predictions_include_calibrated_intervals(long_history, engine, tmp_path):
+    serving.train_and_save(long_history, tmp_path / "models")
+    settings = Settings(database_url="unused", model_dir=tmp_path / "models", reports_dir=tmp_path)
+    c = TestClient(create_app(settings, make_session_factory(engine), serving.ModelStore(settings.model_dir)))
+
+    body = c.get("/predictions").json()
+    assert body["interval_level"] == 0.8 and len(body["drivers"]) == 12
+    assert all(d["interval_low"] < d["interval_high"] for d in body["drivers"])
+
+    def mean_width(level):
+        drivers = c.get("/predictions", params={"level": level}).json()["drivers"]
+        return sum(d["interval_high"] - d["interval_low"] for d in drivers) / len(drivers)
+
+    assert mean_width(0.5) < mean_width(0.8) < mean_width(0.95)
+    assert c.get("/predictions", params={"level": 0.2}).status_code == 422
+    assert c.get("/predictions", params={"level": 0.99}).status_code == 422

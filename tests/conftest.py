@@ -30,3 +30,18 @@ def session(engine):
 
     with make_session_factory(engine)() as s:
         yield s
+
+
+@pytest.fixture
+def long_history(session):
+    from f1opt import ingestion
+    from tests.fakes import FakeClient, make_season
+
+    """54 races of 12 drivers: enough for the calibrator (30 training races, 200+ residuals)."""
+    seasons = {y: make_season(y, 9, 9, n_drivers=12) for y in range(2018, 2024)}
+    seasons[2024] = make_season(2024, 0, 3, n_drivers=12)  # an upcoming race to predict
+    client = FakeClient(seasons)
+    for season in seasons:
+        ingestion.ingest_season(session, client, season, refresh=True)
+    session.commit()
+    return session

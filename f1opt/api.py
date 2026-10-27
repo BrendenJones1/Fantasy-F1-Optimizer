@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from f1opt import prices as price_mod
 from f1opt import serving
+from f1opt.calibration import DEFAULT_LEVEL
 from f1opt.config import Settings, get_settings
 from f1opt.db import make_engine, make_session_factory
 from f1opt.evaluation import bootstrap_ci
@@ -39,12 +40,15 @@ class DriverPrediction(BaseModel):
     price: Optional[float] = None
     price_source: Optional[str] = None
     points_per_million: Optional[float] = None
+    interval_low: Optional[float] = None
+    interval_high: Optional[float] = None
 
 
 class PredictionsOut(BaseModel):
     race: RaceOut
     model: str
     trained_through: dict
+    interval_level: Optional[float] = None  # None when the model has no calibration yet
     drivers: List[DriverPrediction]
 
 
@@ -141,10 +145,15 @@ def create_app(settings: Optional[Settings] = None, session_factory: Optional[se
         return {"status": "ok", "model_ready": model_ready}
 
     @app.get("/predictions", response_model=PredictionsOut)
-    def predictions(session: Session = Depends(get_session), request: Request = None):
+    def predictions(level: float = Query(DEFAULT_LEVEL, ge=0.5, le=0.95,
+                                          description="central prediction-interval level"),
+                    session: Session = Depends(get_session), request: Request = None):
         race, preds = serving.predict_next_race(session, request.app.state.store)
         drv_prices, _ = price_mod.latest_prices(session, race)
         loaded = request.app.state.store.get()
+        if loaded.calibrator is not None:
+            low, high = loaded.calibrator.interval(preds["predicted_points"].to_numpy(), level)
+            preds = preds.assign(interval_low=low, interval_high=high)
         out = []
         for row in preds.itertuples():
             price, source = drv_prices.get(row.driver_id, (None, None))
@@ -152,9 +161,12 @@ def create_app(settings: Optional[Settings] = None, session_factory: Optional[se
                 driver_id=row.driver_id, name=row.name, constructor_id=row.constructor_id,
                 constructor_name=row.constructor_name, predicted_points=round(float(row.predicted_points), 2),
                 price=price, price_source=source,
-                points_per_million=round(float(row.predicted_points) / price, 3) if price else None))
+                points_per_million=round(float(row.predicted_points) / price, 3) if price else None,
+                interval_low=round(float(row.interval_low), 2) if loaded.calibrator else None,
+                interval_high=round(float(row.interval_high), 2) if loaded.calibrator else None))
         return PredictionsOut(race=_race_out(race), model=loaded.metadata["model"],
-                              trained_through=loaded.metadata["trained_through"], drivers=out)
+                              trained_through=loaded.metadata["trained_through"],
+                              interval_level=level if loaded.calibrator else None, drivers=out)
 
     @app.get("/team", response_model=TeamOut)
     def team(budget: Optional[float] = Query(None, gt=0, le=1000, description="budget cap in $M"),
