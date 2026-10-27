@@ -12,6 +12,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from f1opt.calibration import NotEnoughResiduals, ResidualCalibrator, out_of_sample_predictions
 from f1opt.db import Constructor, Driver, Race, Result
 from f1opt.features import FEATURE_COLUMNS, OUTCOME_COLUMNS, TARGET, build_features
 from f1opt.models import make_ridge
@@ -21,7 +22,10 @@ logger = logging.getLogger(__name__)
 # Chosen from the Goal 1 backtest: ridge had the best MAE and Spearman point estimates,
 # statistically tied with LightGBM and the MLP, and is the simplest and fastest to retrain.
 DEPLOYED_MODEL_NAME = "Ridge"
-MODEL_FILE, METADATA_FILE = "model.joblib", "metadata.json"
+MODEL_FILE, METADATA_FILE, CALIBRATION_FILE = "model.joblib", "metadata.json", "calibration.joblib"
+# Residuals for the interval calibrator come from races that had at least this many earlier races
+# to train on (about 1.5 seasons), so early, poorly trained folds do not inflate the intervals.
+CALIBRATION_MIN_TRAIN_RACES = 30
 
 
 class NoUpcomingRace(RuntimeError):
@@ -81,12 +85,29 @@ def latest_entries(session: Session) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["driver_id", "constructor_id"])
 
 
+def fit_calibrator(feats: pd.DataFrame) -> Optional[ResidualCalibrator]:
+    """Interval calibrator from the deployed model's own expanding-window residuals, or None if the
+    history is too short to calibrate honestly."""
+    oos = out_of_sample_predictions(feats, make_ridge, CALIBRATION_MIN_TRAIN_RACES)
+    try:
+        return ResidualCalibrator().fit(oos["y_pred"], oos["y_true"])
+    except NotEnoughResiduals:
+        return None
+
+
+def _atomic_dump(obj, path: Path) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    joblib.dump(obj, tmp)
+    tmp.replace(path)  # atomic swap so the API never reads a half-written file
+
+
 def train_and_save(session: Session, model_dir: Path) -> dict:
     weekends = load_weekends(session)
     if weekends.empty:
         raise ModelNotTrained("no results in the database")
     feats = build_features(weekends)
     model = make_ridge().fit(feats[FEATURE_COLUMNS], feats[TARGET])
+    calibrator = fit_calibrator(feats)
     last = feats.sort_values("race_index").iloc[-1]
     meta = {
         "model": DEPLOYED_MODEL_NAME,
@@ -95,13 +116,19 @@ def train_and_save(session: Session, model_dir: Path) -> dict:
         "n_training_rows": int(len(feats)),
         "n_races": int(feats["race_index"].nunique()),
         "features": FEATURE_COLUMNS,
+        "calibration": None if calibrator is None else {
+            "method": "empirical quantiles of out-of-sample residuals, per quartile of predicted points",
+            "n_residuals": calibrator.n_residuals_, "min_train_races": CALIBRATION_MIN_TRAIN_RACES},
     }
     model_dir = Path(model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
-    tmp = model_dir / (MODEL_FILE + ".tmp")
-    joblib.dump(model, tmp)
-    tmp.replace(model_dir / MODEL_FILE)  # atomic swap so the API never reads a half-written file
+    # model.joblib is written last: the API reloads when it changes and then reads the other two.
+    if calibrator is None:
+        (model_dir / CALIBRATION_FILE).unlink(missing_ok=True)  # never serve a stale calibration
+    else:
+        _atomic_dump(calibrator, model_dir / CALIBRATION_FILE)
     (model_dir / METADATA_FILE).write_text(json.dumps(meta, indent=2))
+    _atomic_dump(model, model_dir / MODEL_FILE)
     logger.info("trained %s on %d rows through %s", DEPLOYED_MODEL_NAME, meta["n_training_rows"],
                 meta["trained_through"])
     return meta
@@ -112,6 +139,7 @@ class LoadedModel:
     model: object
     metadata: dict
     mtime: float
+    calibrator: Optional[ResidualCalibrator] = None
 
 
 class ModelStore:
@@ -128,7 +156,9 @@ class ModelStore:
         mtime = path.stat().st_mtime
         if self._loaded is None or self._loaded.mtime != mtime:
             meta = json.loads((self.model_dir / METADATA_FILE).read_text())
-            self._loaded = LoadedModel(joblib.load(path), meta, mtime)
+            cal_path = self.model_dir / CALIBRATION_FILE
+            calibrator = joblib.load(cal_path) if cal_path.exists() else None
+            self._loaded = LoadedModel(joblib.load(path), meta, mtime, calibrator)
         return self._loaded
 
 
