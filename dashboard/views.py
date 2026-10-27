@@ -18,14 +18,15 @@ def has_intervals(payload: dict) -> bool:
 def interval_chart(df: pd.DataFrame, level: float) -> alt.Chart:
     """Predicted points as a dot, with the calibrated interval as a bar behind it."""
     order = df["Driver"].tolist()  # already sorted by predicted points
-    base = alt.Chart(df).encode(y=alt.Y("Driver:N", sort=order, title=None))
+    base = alt.Chart(df).encode(
+        y=alt.Y("Driver:N", sort=order, title=None, axis=alt.Axis(labelOverlap=False, labelLimit=220)))
     bars = base.mark_rule(strokeWidth=6, opacity=0.35).encode(
         x=alt.X("Low:Q", title="Fantasy points"), x2="High:Q",
         tooltip=["Driver", "Team", "Low", "Predicted", "High"])
     dots = base.mark_point(filled=True, size=70, color="#e10600").encode(x="Predicted:Q", tooltip=["Driver", "Predicted"])
     zero = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(strokeDash=[3, 3], color="grey").encode(x="x:Q")
     return (zero + bars + dots).properties(
-        height=24 * len(df), title=f"Predicted points with {level:.0%} interval")
+        height=26 * len(df), title=f"Predicted points with {level:.0%} interval")
 
 
 def team_frame(payload: dict) -> pd.DataFrame:
