@@ -13,7 +13,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
-      # Only the service dependencies plus test tools: torch/lightgbm are not needed by the tests.
-      - run: pip install -r requirements.txt pytest httpx
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dashboard.txt
+      # Service and dashboard dependencies plus test tools: torch/lightgbm are not needed by the tests.
+      - run: pip install -r requirements.txt -r requirements-dashboard.txt pytest httpx
       - run: python -m pytest tests -q

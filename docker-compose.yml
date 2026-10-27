@@ -47,6 +47,17 @@ services:
       interval: 10s
       retries: 6
 
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    environment:
+      API_URL: http://api:8000
+    ports: ["${DASHBOARD_PORT:-8501}:8501"]
+    depends_on:
+      api:
+        condition: service_healthy
+
   scheduler:
     <<: *app
     command: ["python", "-m", "f1opt.scheduler"]
