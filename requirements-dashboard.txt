@@ -1,0 +1,3 @@
+# Streamlit dashboard. Installed in the dashboard Docker image; it talks to the API over HTTP only.
+streamlit>=1.66,<2
+requests>=2.31.0

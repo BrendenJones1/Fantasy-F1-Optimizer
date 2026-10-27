@@ -1,5 +1,6 @@
 # Research and development: model benchmark, plots and tests (superset of requirements.txt).
 -r requirements.txt
+-r requirements-dashboard.txt
 torch>=2.2.0
 lightgbm>=4.0.0
 matplotlib>=3.7.0
