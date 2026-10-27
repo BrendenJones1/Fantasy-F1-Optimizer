@@ -1,6 +1,6 @@
 # Fantasy F1 Optimizer
 
-Predicts each driver's Fantasy F1 points for the next race and picks the best team under the $100M budget cap. The focus is on evaluating the predictions honestly (time-aware validation, baselines, bootstrap confidence intervals) and on running the pipeline as a service (scheduled ingestion, MySQL, FastAPI, Docker Compose).
+Predicts each driver's Fantasy F1 points for the next race and picks the best team under the $100M budget cap. The focus is on evaluating the predictions honestly (time-aware validation, baselines, bootstrap confidence intervals, calibrated prediction intervals) and on running the pipeline as a service (scheduled ingestion, MySQL, FastAPI, Docker Compose).
 
 ## Problem
 
@@ -38,7 +38,7 @@ docker compose up --build
 This starts MySQL, applies the migrations, serves the API on `http://localhost:8010` and starts the scheduler. The first cycle downloads 2018 onward (about 3 minutes), trains the model and stores prices. Then:
 
 ```bash
-curl localhost:8010/predictions        # predicted points per driver for the next race
+curl localhost:8010/predictions        # predicted points per driver, each with an 80% interval
 curl "localhost:8010/team?budget=100"  # optimal team, with the greedy baseline for comparison
 curl localhost:8010/metrics            # backtest results and deployed-model metadata
 ```
@@ -64,6 +64,7 @@ python -m pytest tests -q
 python scripts/fetch_data.py            # rebuilds data/processed/weekends.csv from Jolpica
 python scripts/run_evaluation.py        # backtest, about 5 minutes; writes reports/
 python scripts/validate_scoring.py      # scoring check against official season totals
+python scripts/run_calibration.py       # interval coverage check, a few seconds; needs run_evaluation first
 ```
 
 ## Evaluation
@@ -101,13 +102,43 @@ How strong is that? Pooled R² is 0.38 and MAE is 8.9 points against 11.8 for a 
 
 The reconstructed points are checked against the game's own 2026 season totals for all 22 drivers (`data/validation/`, `reports/scoring_validation.*`): Pearson r = 0.991, Spearman 0.984. The game's totals are higher by 5.9 points per race on average (sd 1.7 across drivers), which matches the two scored items that are not in result tables: overtakes (+1 each) and Driver of the Day (+10). The 2026 rules are applied to every season, except that the sprint Not Classified penalty is -20 before 2026.
 
+### Calibration
+
+A point forecast says nothing about how far off it can be, and the error here is wide and skewed: a DNF costs a driver about 20 points. `/predictions` therefore returns an interval for each driver (`interval_low`, `interval_high`, level set with `?level=`, 0.5 to 0.95, default 0.8). An interval is the forecast plus empirical quantiles of the model's own out-of-sample residuals, taken separately within quartiles of the predicted points (`f1opt/calibration.py`). The scheduler fits it with the model; `/predictions` returns null intervals when the history is too short to calibrate.
+
+**Check.** `scripts/run_calibration.py` refits each method before every race using only earlier races, after 20 warm-up races, and measures how often the actual points fall inside. 90 races, 1,834 driver-race rows, coverage with 95% bootstrap CIs resampling races. Gaussian and pooled-quantile intervals are the baselines. The interval score is the width plus a penalty for every point outside the interval (lower is better), so it rewards intervals that are both narrow and right.
+
+| Nominal | Method | Observed coverage | Width (points) | Interval score |
+|:--|:--|:--|:--|:--|
+| 0.5 | Gaussian | 0.600 [0.566, 0.633] | 16.0 | 30.4 |
+| 0.5 | Pooled quantiles | 0.485 [0.452, 0.519] | 10.7 | 29.9 |
+| 0.5 | **Binned quantiles** | 0.478 [0.444, 0.511] | 10.8 | **29.5** |
+| 0.8 | Gaussian | 0.790 [0.764, 0.815] | 30.5 | 45.6 |
+| 0.8 | Pooled quantiles | 0.794 [0.771, 0.815] | 30.9 | 44.0 |
+| 0.8 | **Binned quantiles** | 0.782 [0.756, 0.807] | 32.6 | **43.3** |
+| 0.9 | Gaussian | 0.873 [0.854, 0.890] | 39.1 | 54.7 |
+| 0.9 | Pooled quantiles | 0.895 [0.877, 0.911] | 39.7 | 52.9 |
+| 0.9 | **Binned quantiles** | 0.876 [0.858, 0.894] | 38.8 | **49.3** |
+
+Plots are in `reports/` (`calibration_reliability.png`, `calibration_by_bin.png`).
+
+- **Skew breaks the Gaussian assumption.** Gaussian intervals cover 60% when they claim 50%, because most errors are small and a few are very large. Empirical quantiles fix that: at the 50% level they are a third narrower, and at 80% and 90% the widths are within about 2 points of the Gaussian.
+- **Pooled quantiles are right on average and wrong where it matters.** At the 80% level they cover 90% of the lowest-predicted quartile and only 70% of the highest, the drivers team selection cares about. Binning by predicted points gives 77% to 80% in every quartile. It also has the best interval score at every level.
+- **Not perfect.** The 90% intervals cover 87.6%, slightly under nominal (the CI excludes 0.9). Per-quartile values are pooled over driver-races without CIs, so differences of a few points between quartiles are within noise.
+- **The intervals are wide.** An 80% interval is about 33 points across, against a point-estimate MAE of 8.9. A forecast of 15 points comes with a range of roughly -12 to 33. That is the real uncertainty about one driver in one race, not a flaw in the method.
+
 ## Limitations
 
 - **No price history.** Historical Fantasy prices are not public, so prices are not a model feature and the points-per-cost baseline and a team-selection backtest are not possible yet. The optimizer and `/team` use whatever prices are stored for the next race; check `price_sources` in the response.
 - **Overtakes and Driver of the Day are missing from the target.** They are mostly a constant offset; the driver-specific part (sd about 1.7 points per race) is small next to the model's 8.9 point MAE.
+- **Intervals are per driver.** Constructors have no interval, and the correlation between drivers (teammates, safety cars, shared retirements) is not modelled, so there is no distribution for a whole team's score. Calibration assumes future errors look like past ones; a rule change or a new team could break that.
 - **Constructor points** are the sum of the two drivers' predicted points. Qualifying-progress and pit-stop bonuses are not modelled.
 - **Entry list** for the next race is taken from the last completed race.
 - **Prospective check.** Pre-race predictions and teams are logged, and `python scripts/prospective_report.py` scores them once the race is ingested. One race (Mexico City 2026) has been logged and is not yet scored.
+
+## Possible extension
+
+Risk-aware team selection: choose riskier or safer teams depending on the gap to a league rival. It needs a distribution for the whole team (driver correlations) and could only be evaluated in simulation, because historical prices and league data are not available. Not implemented.
 
 ## Data
 
@@ -116,11 +147,11 @@ Results, qualifying and sprint classifications come from the [Jolpica-F1 API](ht
 ## Layout
 
 ```
-f1opt/            package: jolpica, scoring, dataset, features, models, evaluation,
+f1opt/            package: jolpica, scoring, dataset, features, models, evaluation, calibration,
                   db, ingestion, prices, serving, optimizer, recommend, prospective, api, scheduler
 migrations/       Alembic revisions
-scripts/          fetch_data, run_evaluation, validate_scoring, load_prices, ingest, prospective_report
-tests/            pytest suite (ingestion, features and leakage, optimizer, API, scheduler, migrations)
+scripts/          fetch_data, run_evaluation, run_calibration, validate_scoring, load_prices, ingest, prospective_report
+tests/            pytest suite (ingestion, features and leakage, calibration, optimizer, API, scheduler, migrations)
 data/processed/   weekends.csv, the reconstructed per-driver-per-race dataset
 reports/          results table, plots, per-race metrics, scoring validation
 ```

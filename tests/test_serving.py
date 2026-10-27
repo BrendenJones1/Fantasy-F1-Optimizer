@@ -50,3 +50,25 @@ def test_no_upcoming_race_raises(session):
     session.commit()
     with pytest.raises(serving.NoUpcomingRace):
         serving.next_race(session)
+
+
+def test_short_history_is_trained_without_a_calibrator(populated, tmp_path):
+    meta = serving.train_and_save(populated, tmp_path)
+    assert meta["calibration"] is None
+    assert not (tmp_path / serving.CALIBRATION_FILE).exists()
+    assert serving.ModelStore(tmp_path).get().calibrator is None
+
+
+def test_long_history_saves_and_loads_a_calibrator(long_history, tmp_path):
+    meta = serving.train_and_save(long_history, tmp_path)
+    assert meta["calibration"]["n_residuals"] >= 200
+    loaded = serving.ModelStore(tmp_path).get()
+    assert loaded.calibrator is not None and loaded.metadata["calibration"] == meta["calibration"]
+    low, high = loaded.calibrator.interval([5.0, 20.0], 0.8)
+    assert (low < high).all()
+
+
+def test_stale_calibrator_is_removed_when_history_is_too_short(populated, tmp_path):
+    (tmp_path / serving.CALIBRATION_FILE).write_bytes(b"left over from an earlier run")
+    serving.train_and_save(populated, tmp_path)
+    assert not (tmp_path / serving.CALIBRATION_FILE).exists()
