@@ -1,6 +1,6 @@
 # Fantasy F1 Optimizer
 
-Predicts each driver's Fantasy F1 points for the next race and picks the best team under the $100M budget cap. The focus is on evaluating the predictions honestly (time-aware validation, baselines, bootstrap confidence intervals, calibrated prediction intervals) and on running the pipeline as a service (scheduled ingestion, MySQL, FastAPI, Docker Compose).
+Predicts each driver's Fantasy F1 points for the next race and picks the best team under the $100M budget cap. The focus is on evaluating the predictions honestly (time-aware validation, baselines, bootstrap confidence intervals, calibrated prediction intervals) and on running the pipeline as a service (scheduled ingestion, MySQL, FastAPI, Streamlit dashboard, Docker Compose).
 
 ## Problem
 
@@ -20,6 +20,7 @@ flowchart LR
         DB --> A[FastAPI]
         S -- model.joblib --> A
         M[migrate<br/>Alembic] --> DB
+        D[dashboard<br/>Streamlit] --> A
     end
     A --> E["/predictions  /team  /metrics"]
 ```
@@ -35,7 +36,7 @@ flowchart LR
 docker compose up --build
 ```
 
-This starts MySQL, applies the migrations, serves the API on `http://localhost:8010` and starts the scheduler. The first cycle downloads 2018 onward (about 3 minutes), trains the model and stores prices. Then:
+This starts MySQL, applies the migrations, serves the API on `http://localhost:8010`, starts the scheduler and serves the dashboard on `http://localhost:8501`. The first cycle downloads 2018 onward (about 3 minutes), trains the model and stores prices. Then:
 
 ```bash
 curl localhost:8010/predictions        # predicted points per driver, each with an 80% interval
@@ -43,7 +44,13 @@ curl "localhost:8010/team?budget=100"  # optimal team, with the greedy baseline 
 curl localhost:8010/metrics            # backtest results and deployed-model metadata
 ```
 
-Ports are configurable with `API_PORT` and `DB_PORT` (see `.env.example`).
+Ports are configurable with `API_PORT`, `DB_PORT` and `DASHBOARD_PORT` (see `.env.example`).
+
+**Dashboard.** The Streamlit app has three tabs: next-race predictions with a calibrated interval chart, the optimal team for an adjustable budget, and the backtest metrics. It reads everything through the API and holds no data of its own. To run it outside Docker, with the API up:
+
+```bash
+API_URL=http://localhost:8010 python -m streamlit run dashboard/app.py   # from the repo root
+```
 
 **Prices.** There is no public source of Fantasy prices, so they are loaded by hand or collected going forward. Without real prices the scheduler stores clearly labelled `demo` prices (derived from recent form) so the pipeline runs end to end; real prices override them.
 
@@ -149,9 +156,10 @@ Results, qualifying and sprint classifications come from the [Jolpica-F1 API](ht
 ```
 f1opt/            package: jolpica, scoring, dataset, features, models, evaluation, calibration,
                   db, ingestion, prices, serving, optimizer, recommend, prospective, api, scheduler
+dashboard/        Streamlit app (app, api_client, views) and its Dockerfile
 migrations/       Alembic revisions
 scripts/          fetch_data, run_evaluation, run_calibration, validate_scoring, load_prices, ingest, prospective_report
-tests/            pytest suite (ingestion, features and leakage, calibration, optimizer, API, scheduler, migrations)
+tests/            pytest suite (ingestion, features and leakage, calibration, optimizer, API, scheduler, dashboard, migrations)
 data/processed/   weekends.csv, the reconstructed per-driver-per-race dataset
 reports/          results table, plots, per-race metrics, scoring validation
 ```
