@@ -52,6 +52,12 @@ Ports are configurable with `API_PORT`, `DB_PORT` and `DASHBOARD_PORT` (see `.en
 API_URL=http://localhost:8010 python -m streamlit run dashboard/app.py   # from the repo root
 ```
 
+![Predictions tab: each driver's forecast with its calibrated 80% interval](docs/dashboard_predictions.png)
+
+![Team tab: the optimal team under the budget cap](docs/dashboard_team.png)
+
+The screenshots come from the Docker Compose stack and use the demo prices (see Prices below), so the picked team is illustrative. The wide bars are the point: a single driver's score in a single race is very uncertain.
+
 **Prices.** There is no public source of Fantasy prices, so they are loaded by hand or collected going forward. Without real prices the scheduler stores clearly labelled `demo` prices (derived from recent form) so the pipeline runs end to end; real prices override them.
 
 ```bash
