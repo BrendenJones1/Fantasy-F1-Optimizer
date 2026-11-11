@@ -63,7 +63,7 @@ The screenshots come from the Docker Compose stack and use the demo prices (see 
 ```bash
 # CSV columns: entity (driver|constructor), id, price
 export DATABASE_URL=mysql+pymysql://f1:f1-dev-password@127.0.0.1:3307/f1opt
-python scripts/load_prices.py --csv data/prices/2026_r19_mexico_city.csv --source fantasy-manual
+python -m scripts.load_prices --csv data/prices/2026_r19_mexico_city.csv --source fantasy-manual
 ```
 
 IDs are Jolpica IDs (`max_verstappen`, `red_bull`, `rb`, ...); see the sample file. `FantasyApiPriceSource` can read prices with a session cookie in `F1_FANTASY_COOKIE`, but it has not been verified against the live service.
@@ -74,10 +74,10 @@ IDs are Jolpica IDs (`max_verstappen`, `red_bull`, `rb`, ...); see the sample fi
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt     # on macOS LightGBM also needs: brew install libomp
 python -m pytest tests -q
-python scripts/fetch_data.py            # rebuilds data/processed/weekends.csv from Jolpica
-python scripts/run_evaluation.py        # backtest, about 5 minutes; writes reports/
-python scripts/validate_scoring.py      # scoring check against official season totals
-python scripts/run_calibration.py       # interval coverage check, a few seconds; needs run_evaluation first
+python -m scripts.fetch_data            # rebuilds data/processed/weekends.csv from Jolpica
+python -m scripts.run_evaluation        # backtest, about 5 minutes; writes reports/
+python -m scripts.validate_scoring      # scoring check against official season totals
+python -m scripts.run_calibration       # interval coverage check, a few seconds; needs run_evaluation first
 ```
 
 ## Evaluation
@@ -140,14 +140,31 @@ Plots are in `reports/` (`calibration_reliability.png`, `calibration_by_bin.png`
 - **Not perfect.** The 90% intervals cover 87.6%, slightly under nominal (the CI excludes 0.9). Per-quartile values are pooled over driver-races without CIs, so differences of a few points between quartiles are within noise.
 - **The intervals are wide.** An 80% interval is about 33 points across, against a point-estimate MAE of 8.9. A forecast of 15 points comes with a range of roughly -12 to 33. That is the real uncertainty about one driver in one race, not a flaw in the method.
 
+### Prospective check
+
+A backtest can still leak by accident; a prediction written to the database before the race cannot. The scheduler logs the deployed model's predictions and recommended team for the next race (`prediction_log`, `team_recommendation_log`), and `python -m scripts.prospective_report` scores them once the result is ingested.
+
+**Mexico City 2026** (round 19), logged on 26 October, six days before the race, by Ridge trained through round 18. The naive baseline is computed afterwards from the same pre-race data.
+
+| | MAE | Spearman | Top-5 capture |
+|:--|:--|:--|:--|
+| Ridge (logged) | 9.77 | 0.728 | 0.977 |
+| Naive (rolling mean of last 3) | 10.56 | 0.660 | 1.000 |
+| Ridge, backtest median per race | 8.37 | 0.604 | 0.756 |
+
+- The ranking was better than in 81% of backtest races; the error was a little worse than the median (64th percentile). Five drivers retired (-20 race points each), which the model cannot foresee, and Hamilton (+17) and Verstappen (+15) beat their forecasts.
+- The recommended team (manual prices, $99.9M) expected 115.8 points and scored 98 on the reconstructed scoring. Leclerc with DRS and the Ferrari and Mercedes constructors carried it; two of the four budget drivers scored -20.
+- 21 of 22 predictions were scored: Hirakawa raced in place of Ocon, which the entry-list assumption (below) missed.
+- One race is an anecdote, not evidence. Brazil (round 20) was not logged because the stack was not running; later rounds are being logged.
+
 ## Limitations
 
 - **No price history.** Historical Fantasy prices are not public, so prices are not a model feature and the points-per-cost baseline and a team-selection backtest are not possible yet. The optimizer and `/team` use whatever prices are stored for the next race; check `price_sources` in the response.
 - **Overtakes and Driver of the Day are missing from the target.** They are mostly a constant offset; the driver-specific part (sd about 1.7 points per race) is small next to the model's 8.9 point MAE.
 - **Intervals are per driver.** Constructors have no interval, and the correlation between drivers (teammates, safety cars, shared retirements) is not modelled, so there is no distribution for a whole team's score. Calibration assumes future errors look like past ones; a rule change or a new team could break that.
 - **Constructor points** are the sum of the two drivers' predicted points. Qualifying-progress and pit-stop bonuses are not modelled.
-- **Entry list** for the next race is taken from the last completed race.
-- **Prospective check.** Pre-race predictions and teams are logged, and `python scripts/prospective_report.py` scores them once the race is ingested. One race (Mexico City 2026) has been logged and is not yet scored.
+- **Entry list** for the next race is taken from the last completed race, so a substitute driver is missed (Hirakawa for Ocon in Mexico City 2026).
+- **Prospective sample is small.** One race has been scored so far (see Prospective check).
 
 ## Possible extension
 
